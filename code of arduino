@@ -1,0 +1,469 @@
+#include <Pixy2.h>
+
+#define INA1 40
+#define INB1 42
+#define PWM1 44
+#define INA2 32
+#define INB2 30
+#define PWM2 6
+#define myflag 1
+#define safe_distance 20
+#define Emergency_distance 13
+#define TurningSpeed 30
+#define TurningSpeed1 225
+#define Rotation_speed 30
+
+#define GoAround 200
+#define HEIGHT 30
+int c = 0;
+int SpeedOfAdvance = 45;
+float midpoint;
+int My_signal;
+int distance = 50;
+
+enum Status {LosingTarget, Tracking} flag = LosingTarget;
+
+enum movement {left, right, forward, back, cease , right_gently, left_gently} Move, MotorStatus = cease;
+int n = 0;
+
+//configure ultrasonic sensor
+int trigPin = 11;
+int echoPin = 10;
+long duration, cm = 100, inches;
+Pixy2 pixy;
+
+void myprint(char *str)
+{
+  if (myflag)
+  {
+    char temp[20];
+    int i;
+    i = 0;
+    while (*(str + i) != '\0')
+    {
+      temp[i] = *(str + i);
+      Serial.print(temp[i]);
+      i++;
+    }
+    Serial.print('\n');
+  }
+}
+
+void numPrint(int haha)
+{
+  if (myflag)
+  {
+    char buffer[10];
+    sprintf(buffer, "%d", haha);
+    Serial.println(buffer);
+  }
+}
+
+void detectObstacles()
+{
+
+  distance = analogRead(A3);
+
+  numPrint(distance);
+
+
+  if (distance >= safe_distance)
+  {
+    SpeedOfAdvance = 45;
+  }
+  else if ( Emergency_distance <= distance && distance < safe_distance)
+  {
+    myprint("前方疑似有障碍物");
+    SpeedOfAdvance = 25;
+  }
+  else if (Emergency_distance > distance)
+  {
+    while (Emergency_distance > distance)
+    {
+      myprint("前方有障碍物");
+      stopmotor();
+      delay(1000);
+      CarMove(back);
+      delay(10);
+      distance = analogRead(A3);
+    }
+  }
+}
+
+void Check_traffic()
+{
+  myprint("对距离做出判断");
+  distance = analogRead(A3);
+  if (distance < safe_distance)
+  {
+    stopmotor();
+    delay(1000);
+    CarMove(back);
+    delay(600);
+    CarMove(left);
+    delay(300);
+  }
+}
+
+
+
+void stopmotor()
+{
+  myprint(" stop");
+
+  digitalWrite(INA1, LOW);
+  digitalWrite(INB1, LOW);
+
+  digitalWrite(INA2, LOW);
+  digitalWrite(INB2, LOW);
+
+}
+
+void motor(char type, boolean direct, int mySpeed)
+{
+  if (type == 'A')
+  {
+    if (direct)
+    {
+      digitalWrite(INA1, LOW);
+      digitalWrite(INB1, HIGH);
+    }
+    else
+    {
+      digitalWrite(INA1, HIGH);
+      digitalWrite(INB1, LOW);
+    }
+    analogWrite(PWM1, mySpeed);
+  }
+  else if (type == 'B')
+  {
+    if (direct)
+    {
+      digitalWrite(INA2, LOW);
+      digitalWrite(INB2, HIGH);
+    }
+    else
+    {
+      digitalWrite(INA2, HIGH);
+      digitalWrite(INB2, LOW);
+    }
+    analogWrite(PWM2, mySpeed);
+  }
+}
+
+
+void CarMove(enum movement Direction)         //enum movement {left, right, forward, back, cease , right_gently , left_gently} Move, MotorStatus = cease;
+{
+  if (MotorStatus != Direction)
+  {
+    switch (Direction)
+    {
+      case left:
+        myprint("carleft");
+        motor('A', 0, Rotation_speed);
+        motor('B', 1, Rotation_speed);
+        MotorStatus = left;
+        delay(5);
+        break;
+
+      case right:
+        myprint("carright");
+        motor('B', 0, Rotation_speed);
+        motor('A', 1, Rotation_speed);
+        MotorStatus = right;
+        delay(5);
+        break;
+
+      case forward:
+        myprint("car forward");
+        motor('A', 1, SpeedOfAdvance);
+        motor('B', 1, SpeedOfAdvance);
+        MotorStatus = forward;
+        delay(10);
+        break;
+
+      case back:
+        myprint("back");
+        motor('A', 0, SpeedOfAdvance);
+        motor('B', 0, SpeedOfAdvance);
+        MotorStatus = back;
+        delay(5);
+        break;
+
+      case cease:
+        myprint("stop");
+        stopmotor();
+        MotorStatus = cease;
+        break;
+
+      case right_gently:
+        myprint("right_gently");
+        motor('B', 1, TurningSpeed);
+        motor('A', 1, TurningSpeed1);
+        MotorStatus = right_gently;
+        break;
+
+      case left_gently:
+        myprint("left_gently");
+        motor('B', 1, TurningSpeed1);
+        motor('A', 1, TurningSpeed);
+        MotorStatus = left_gently;
+        break;
+
+    }
+  }
+}
+
+
+long Obstacle_distance()
+{
+  myprint("检测距离");
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(5);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  // Read the signal from the sensor: a HIGH pulse whose
+  // duration is the time (in microseconds) from the sending
+  // of the ping to the reception of its echo off of an object.
+
+  duration = pulseIn(echoPin, HIGH);
+  // convert the time into a distance
+  cm = (duration / 2) / 29.1;
+
+  myprint("cm = " );
+  numPrint(cm);
+  return cm;
+}
+
+void Starve()                                                                      //找到入口
+{
+  while (flag == LosingTarget)
+  {
+    while (flag == LosingTarget)
+    {
+      for (int i = 0; i <= GoAround ; i++ )//让车绕一圈的值
+      {
+        myprint("旋转搜索");
+        Check_traffic();
+        myprint("交通检查完毕");
+        pixy.ccc.getBlocks();//获取方块的特征
+        if (pixy.ccc.numBlocks >= 2 && 75 < pixy.ccc.blocks[0].m_width && pixy.ccc.blocks[0].m_width < 150 && 75 < pixy.ccc.blocks[1].m_width && pixy.ccc.blocks[1].m_width < 150)
+        {
+          flag = Tracking;
+          myprint("找到合格目标");
+          myprint("即将跳出循环");
+          break;
+        }
+        CarMove(left);
+        myprint("旋转次数 = ");
+        numPrint(i);
+      }
+
+      if (flag == Tracking)
+      {
+        myprint("即将再次跳出循环");
+        break;
+      }
+      for (int u = 0; u <= 40 ; ++u )
+      {
+        myprint("前进搜索");
+        Check_traffic();
+        pixy.ccc.getBlocks();//获取方块的特征
+        if (pixy.ccc.numBlocks >= 2 && 75 < pixy.ccc.blocks[0].m_width && pixy.ccc.blocks[0].m_width < 150 && 75 < pixy.ccc.blocks[1].m_width && pixy.ccc.blocks[1].m_width < 150)
+        {
+          flag = Tracking;
+          break;
+        }
+
+        CarMove(forward);
+        myprint("前进次数 = ");
+        numPrint(u);
+      }
+    }
+    myprint("准备获取新的图像");
+    //此时开始向目标进发
+    pixy.ccc.getBlocks();
+    while (pixy.ccc.blocks[0].m_height < HEIGHT && pixy.ccc.blocks[1].m_height < HEIGHT)
+    {
+      myprint("向目标进发");
+      Check_traffic();
+      if (pixy.ccc.numBlocks >= 2 && 80 < pixy.ccc.blocks[0].m_width && pixy.ccc.blocks[0].m_width < 160 && 75 < pixy.ccc.blocks[1].m_width && pixy.ccc.blocks[1].m_width < 160)
+      {
+        midpoint = (pixy.ccc.blocks[0].m_x + pixy.ccc.blocks[1].m_x) / 2;
+
+        while ( 140 > midpoint )
+        {
+          myprint("修正角度左");
+          CarMove(left);
+          pixy.ccc.getBlocks();
+          if (pixy.ccc.numBlocks <= 2 || 60 > pixy.ccc.blocks[0].m_width || pixy.ccc.blocks[0].m_width > 190 || 70 > pixy.ccc.blocks[1].m_width || pixy.ccc.blocks[1].m_width > 190)
+          {
+            myprint("丢失目标");
+            flag = LosingTarget;
+            break;
+          }
+          midpoint = (pixy.ccc.blocks[0].m_x + pixy.ccc.blocks[1].m_x) / 2;
+        }
+        while (midpoint > 175)
+        {
+          myprint("修正角度右");
+          CarMove(right);
+          pixy.ccc.getBlocks();
+          if (pixy.ccc.numBlocks <= 2 || 60 > pixy.ccc.blocks[0].m_width || pixy.ccc.blocks[0].m_width > 190 || 70 > pixy.ccc.blocks[1].m_width || pixy.ccc.blocks[1].m_width > 190)
+          {
+            myprint("丢失目标");
+            flag = LosingTarget;
+            break;
+          }
+          midpoint = (pixy.ccc.blocks[0].m_x + pixy.ccc.blocks[1].m_x) / 2;
+        }
+      }
+      else
+      {
+        myprint("丢失目标");
+        flag = LosingTarget;
+      }
+      if (flag == LosingTarget)
+      {
+        myprint("准备重新搜寻");
+        break;
+      }
+      CarMove(forward);
+    }
+  }
+}
+
+
+void detectline()
+{
+STA:
+  myprint("开始测线");
+  pixy.line.getMainFeatures();
+  c = 0;
+//      Serial.println("12138");
+  while (pixy.line.numVectors <= 0)
+  {
+//   Serial.println("12139");
+    c++;
+       Serial.println(c);
+    myprint("前方没线");
+    pixy.line.getMainFeatures();
+
+    detectObstacles();
+    CarMove(forward);
+    if (c >= 170)
+    {
+      myprint("开始找线");
+      flag = LosingTarget;
+      c = 0;
+      Starve();
+
+      goto STA;
+    }
+  }
+  if (pixy.line.numVectors)
+  {
+    Serial.println("12139");
+    int X0 = pixy.line.vectors->m_x0;
+    int Y0 = pixy.line.vectors->m_y0;
+    int X1 = pixy.line.vectors->m_x1;
+    int Y1 = pixy.line.vectors->m_y1;
+
+    if (Y0 < Y1)
+    {
+      Y0 = pixy.line.vectors->m_y1;
+      X0 = pixy.line.vectors->m_x1;
+    }
+
+    if (X0 <= 39)
+    {
+      if (Y0 > 26 && Y0 <= 30)
+      {
+        detectObstacles();
+        myprint("向右调整");
+        CarMove(right_gently);
+
+      }
+      else if (Y0 < 21 && Y0 >= 17)
+      {
+        detectObstacles();
+        myprint("向左调整");
+        CarMove(left_gently);
+      }
+      else if (X0 > 8 || Y0 > 30)
+      {
+        detectObstacles();
+        myprint("猛地向右调整");
+        CarMove(right);
+      }
+      else if (Y0 < 17)
+      {
+        detectObstacles();
+        myprint("猛地向左调整");
+        CarMove(left);
+      }
+      else
+      {
+        detectObstacles();
+        CarMove(forward);
+      }
+    }
+    else
+    {
+      if (Y0 < 23 && Y0 >= 19)
+      {
+        detectObstacles();
+        myprint("向右调整");
+        CarMove(right_gently);
+
+      }
+      else if (Y0 > 32 && Y0 <= 36)
+      {
+        detectObstacles();
+        myprint("向左调整");
+        CarMove(left_gently);
+      }
+      else if (X0 < 70 || Y0 > 36)
+      {
+        detectObstacles();
+        myprint("猛地向左调整");
+        CarMove(left_gently);
+      }
+      else if (Y0 < 19)
+      {
+        detectObstacles();
+        myprint("猛地向右调整");
+        CarMove(right_gently);
+      }
+      else
+      {
+        detectObstacles();
+        CarMove(forward);
+      }
+    }
+  }
+}
+
+void setup() {
+  pinMode(INA1, OUTPUT);
+  pinMode(INB1, OUTPUT);
+  pinMode(PWM1, OUTPUT);
+  pinMode(INA2, OUTPUT);
+  pinMode(INB2, OUTPUT);
+  pinMode(PWM2, OUTPUT);
+  pinMode(A3, INPUT);
+  Serial.begin(115200);
+  Serial.print("Starting...\n");
+  myprint("指令执行完毕");
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pixy.init();
+  Starve();
+  Serial.println("setup结束了");
+}
+
+void loop() {
+  detectline();
+
+}
